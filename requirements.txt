@@ -1,0 +1,7 @@
+livekit-agents
+livekit-plugins-deepgram
+livekit-plugins-google
+livekit-plugins-silero
+python-dotenv
+pypdf
+tk
