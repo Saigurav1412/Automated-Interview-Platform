@@ -121,3 +121,10 @@ python launcher.py dev
 4. Your browser will automatically open localhost:3000.
 5. Click "Connect".
 6. Start talking! (e.g., "Hi, I'm Alex and I'm applying for the Python Developer role.")
+
+
+## 🤝 Collaboration & Contributions
+
+Contributions are welcome! Whether you want to **add new interview personas** (e.g., Product Manager, Designer), **improve resume parsing accuracy**, **optimize voice latency**, or **enhance the Next.js UI**, feel free to open an issue or submit a pull request.
+
+Please ensure your work is well-documented and follows the existing modular structure (separating `agents.py`, `prompts.py`, and `frontend/`).
