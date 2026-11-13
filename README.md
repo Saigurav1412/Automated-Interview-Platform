@@ -113,6 +113,15 @@ Terminal 2: Start the App (The Launcher)
 python launcher.py
 ```
 
+## 🐳 Alternative: Run with Docker
+No Python or Node install needed, just [Docker](https://www.docker.com/products/docker-desktop/). You still need the two config files from Step 2.
+```
+cd AI-INTERVIEWER
+cp /path/to/your/resume.pdf resume.pdf
+docker compose up --build
+```
+Then open http://localhost:3000 and click "Connect". The Tkinter launcher isn't used with Docker: the agent reads `AI-INTERVIEWER/resume.pdf`. To use a shorter interview, run `INTERVIEW_SECONDS=60 docker compose up`.
+
 ## Instructions:
 1. The Launcher window will pop up.
 2. Click "Browse PDF" $\rightarrow$ Select your Resume.

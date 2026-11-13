@@ -1,0 +1,22 @@
+# Runs the voice agent and the web frontend together.
+#   1. Put API keys in .env (agent) and frontend/.env.local (frontend)
+#   2. Put the candidate's resume at ./resume.pdf
+#   3. docker compose up --build   ->  open http://localhost:3000
+services:
+  agent:
+    build: .
+    env_file: .env
+    environment:
+      INTERVIEW_SECONDS: ${INTERVIEW_SECONDS:-600}
+    volumes:
+      - ./resume.pdf:/app/resume.pdf:ro
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    env_file: ./frontend/.env.local
+    ports:
+      - "3000:3000"
+    depends_on:
+      - agent
+    restart: unless-stopped

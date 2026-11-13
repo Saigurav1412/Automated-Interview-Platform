@@ -209,3 +209,6 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# Candidate resume mounted into the Docker agent
+AI-INTERVIEWER/resume.pdf
