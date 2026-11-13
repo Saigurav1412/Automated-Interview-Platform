@@ -39,18 +39,23 @@ async def entrypoint(ctx: JobContext):
 
     speech_state = {"last_user_speech": time.time()}
 
-    @session.on("user_speech_committed")
-    def on_user_speech(msg):
+    @session.on("user_input_transcribed")
+    def on_user_speech(ev):
         speech_state["last_user_speech"] = time.time()
-        if agent.current_stage == InterviewStage.INTRO:
-            agent.intro_text += " " + msg.content
+        if ev.is_final and agent.current_stage == InterviewStage.INTRO:
+            agent.intro_text += " " + ev.transcript
 
     # 4. Start
     await session.start(agent=agent, room=ctx.room)
 
     # 5. Run the Stage Manager (Imported from agents.py)
     # DO NOT define stage_manager() here. Use the imported one.
-    asyncio.create_task(run_stage_manager(session, agent, speech_state))
+    stage_task = asyncio.create_task(run_stage_manager(session, agent, speech_state))
+
+    async def _stop_stage_manager():
+        stage_task.cancel()
+
+    ctx.add_shutdown_callback(_stop_stage_manager)
 
     # 6. First Greeting
     await asyncio.sleep(1)

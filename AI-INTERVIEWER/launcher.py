@@ -4,10 +4,27 @@ import subprocess
 import webbrowser
 import os
 import sys
-import signal
+
+# Resolve paths from this file's location so the launcher works from any directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MAIN_SCRIPT = os.path.join(BASE_DIR, "src", "main.py")
 
 # Global variable to track the background process
 agent_process = None
+
+
+def stop_agent():
+    """Terminate the running agent process (if any) and wait for it to exit."""
+    global agent_process
+    if agent_process and agent_process.poll() is None:
+        print("Stopping AI Agent...")
+        agent_process.terminate()
+        try:
+            agent_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            agent_process.kill()
+            agent_process.wait()
+    agent_process = None
 
 class InterviewLauncher:
     def __init__(self, root):
@@ -57,14 +74,13 @@ class InterviewLauncher:
         # It runs: python src/main.py dev
         print(f"--- Launching Agent with Resume: {self.resume_path} ---")
         try:
-            # kill previous process if exists
-            if agent_process:
-                os.kill(agent_process.pid, signal.SIGTERM)
+            # stop previous process if exists
+            stop_agent()
             
             agent_process = subprocess.Popen(
-                [sys.executable, "src/main.py", "dev"], 
+                [sys.executable, MAIN_SCRIPT, "dev"], 
                 env=env,
-                cwd=os.getcwd() # Run from root
+                cwd=BASE_DIR # Run from the AI-INTERVIEWER folder
             )
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start Python Agent:\n{e}")
@@ -72,16 +88,14 @@ class InterviewLauncher:
 
         # 3. Open the Web Browser automatically
         # Waits 2 seconds for Python to warm up, then opens the room
-        root.after(2000, lambda: webbrowser.open("http://localhost:3000"))
+        self.root.after(2000, lambda: webbrowser.open("http://localhost:3000"))
         
         # 4. Minimize or Close Launcher
         self.root.iconify() # Minimized
 
 def on_closing():
     """Cleanup when closing the window"""
-    if agent_process:
-        print("Stopping AI Agent...")
-        agent_process.terminate()
+    stop_agent()
     root.destroy()
 
 if __name__ == "__main__":

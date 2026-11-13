@@ -92,9 +92,9 @@ Open a terminal in the root folder (AI-INTERVIEWER/) and install the Python depe
 pip install -r requirements.txt
 ```
 2. Install Frontend (Next.js)
-Open a terminal in the frontend folder (AI-INTERVIEWER/frontend/) and install the Node modules:
+Open a terminal in the frontend folder (AI-INTERVIEWER/frontend/) and install the Node modules with pnpm (the project's package manager, pinned by `pnpm-lock.yaml`):
 ```
-npm install
+npx pnpm install
 ```
 🚀 Step 4: How to Run
 You need two terminal windows open side-by-side.
@@ -110,8 +110,7 @@ Wait until you see: Ready in ... ms. Leave this running.
 Terminal 2: Start the App (The Launcher)
 ```
 # Make sure you are in the root 'AI-INTERVIEWER' folder
-cd src
-python launcher.py dev
+python launcher.py
 ```
 
 ## Instructions:
@@ -121,6 +120,13 @@ python launcher.py dev
 4. Your browser will automatically open localhost:3000.
 5. Click "Connect".
 6. Start talking! (e.g., "Hi, I'm Alex and I'm applying for the Python Developer role.")
+
+## How the interview flows
+1. **Intro:** The agent greets you and asks for your name and the role you're applying for.
+2. **Experience:** As soon as it hears a role (technical, sales or HR), it switches to that persona, using your resume as context. If no role is heard within `INTRO_TIMEOUT_SECONDS` (default 45), it guesses the role from your resume, and falls back to HR.
+3. **Closing:** After `INTERVIEW_SECONDS` (default 600) in the experience stage, it waits for you to finish speaking, thanks you and says goodbye.
+
+Both timers can be set in `AI-INTERVIEWER/.env`.
 
 
 ## 🤝 Collaboration & Contributions
