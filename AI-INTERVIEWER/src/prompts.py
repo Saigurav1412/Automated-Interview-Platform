@@ -8,7 +8,9 @@ Stage_PROMPTS = {
         YOUR PROTOCOL:
         1. FIRST, ask for the candidate's full name and the ROLE they are applying for.
         2. WAIT for the user to answer.
-        3. ONLY AFTER you know the role, proceed to the interview.
+        3. If they give a name but no role (or the reverse), ask only for the missing part.
+        Do NOT ask any interview, technical, or resume questions yourself; the interview starts separately.
+        Keep every response to one or two short sentences, in plain spoken language (no lists or markdown).
         """
     ),
     # This is the FALLBACK only. It gets overwritten if a role is detected.
@@ -23,8 +25,13 @@ Stage_PROMPTS = {
 
 # 2. TRANSITIONS
 TRANSITION_PHRASES = {
-    InterviewStage.EXPERIENCE: "Thank you. Let's discuss your experience.",
-    InterviewStage.CLOSING: "Thank you for your time. Goodbye."
+    # Spoken right after the role is detected; the persona prompt then takes over
+    # from the candidate's answer
+    InterviewStage.EXPERIENCE: "Thank you. To start, could you briefly introduce yourself?",
+    InterviewStage.CLOSING: (
+        "That's all the time we have today. Thank you for your answers, "
+        "it was great speaking with you. Goodbye."
+    ),
 }
 
 # 3. PERSONA OVERRIDES (The Brains)

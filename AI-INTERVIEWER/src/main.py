@@ -35,9 +35,24 @@ async def entrypoint(ctx: JobContext):
         llm=google.LLM(model="models/gemini-2.5-flash"),
         tts=deepgram.TTS(),
         vad=silero.VAD.load(),
+        # Wait for a longer pause before treating the candidate's turn as finished,
+        # so thinking pauses mid-answer don't trigger the next question (default 0.5s)
+        min_endpointing_delay=1.5,
     )
 
-    speech_state = {"last_user_speech": time.time()}
+    speech_state = {
+        "last_user_speech": time.time(),
+        "last_agent_speech_end": 0.0,
+        "agent_busy": False,
+    }
+
+    @session.on("agent_state_changed")
+    def on_agent_state(ev):
+        # The stage manager must not close the interview while the agent is
+        # generating or speaking a reply (e.g. a new question after "skip")
+        speech_state["agent_busy"] = ev.new_state in ("thinking", "speaking")
+        if ev.old_state == "speaking" and ev.new_state != "speaking":
+            speech_state["last_agent_speech_end"] = time.time()
 
     @session.on("user_input_transcribed")
     def on_user_speech(ev):

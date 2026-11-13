@@ -124,9 +124,9 @@ python launcher.py
 ## How the interview flows
 1. **Intro:** The agent greets you and asks for your name and the role you're applying for.
 2. **Experience:** As soon as it hears a role (technical, sales or HR), it switches to that persona, using your resume as context. If no role is heard within `INTRO_TIMEOUT_SECONDS` (default 45), it guesses the role from your resume, and falls back to HR.
-3. **Closing:** After `INTERVIEW_SECONDS` (default 600) in the experience stage, it waits for you to finish speaking, thanks you and says goodbye.
+3. **Closing:** After `INTERVIEW_SECONDS` (default 600) in the experience stage, it waits for you to answer the current question and finish speaking, then thanks you and says goodbye. If you don't answer, it closes anyway after a grace period of `INTERVIEW_GRACE_SECONDS` (default 120), so you always have time to think.
 
-Both timers can be set in `AI-INTERVIEWER/.env`.
+These timers can be set in `AI-INTERVIEWER/.env`.
 
 
 ## 🤝 Collaboration & Contributions

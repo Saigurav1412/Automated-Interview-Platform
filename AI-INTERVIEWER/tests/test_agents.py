@@ -3,6 +3,8 @@ import time
 
 import pytest
 
+from livekit.agents import StopResponse, llm
+
 from agents import InterviewAgent, detect_role, run_stage_manager
 from prompts import PERSONA_OVERRIDES, Stage_PROMPTS, TRANSITION_PHRASES
 from stages import InterviewStage
@@ -17,6 +19,11 @@ from stages import InterviewStage
         ("I am a software engineer", "technical"),
         ("I work in engineering", "technical"),
         ("I love coding", "technical"),
+        ("Myself, Aaron, and I'm trying for SD role.", "technical"),  # real Deepgram transcript of "SDE"
+        ("Applying for an SDE position", "technical"),
+        ("I'm an S D E", "technical"),
+        ("SWE intern", "technical"),
+        ("software role", "technical"),
         ("I'm interviewing for a sales position", "sales"),
         ("Marketing lead", "sales"),
         ("I'd like the HR role", "hr"),
@@ -35,6 +42,9 @@ def test_detect_role_matches(text, expected):
         "I like to decode puzzles",          # "code" inside "decode"
         "My name is Alex Thrasher",          # "hr" inside "Thrasher"
         "I enjoy architecture",              # "tech" inside "architecture"
+        "I use the SDK daily",               # "sd" inside "SDK"
+        "Wednesday is fine",                 # "sd" inside "Wednesday"
+        "Answered the question",             # "swe" inside "answered"
         "Hello there",
         "",
         None,
@@ -49,13 +59,18 @@ def test_detect_role_no_false_positives(text):
 class FakeSession:
     def __init__(self, fail_times=0):
         self.said = []
+        self.calls = []  # ordered log of ("interrupt",) / ("say", text)
         self.fail_times = fail_times
+
+    async def interrupt(self):
+        self.calls.append(("interrupt",))
 
     async def say(self, text):
         if self.fail_times > 0:
             self.fail_times -= 1
             raise RuntimeError("transient TTS failure")
         self.said.append(text)
+        self.calls.append(("say", text))
 
 
 FAST = dict(poll_interval=0.01, silence_seconds=0.1)
@@ -70,7 +85,7 @@ async def wait_for(cond, timeout=2.0):
 
 
 def start(session, agent, speech_state, **kwargs):
-    opts = {**FAST, "intro_timeout": 60, "interview_seconds": 60, **kwargs}
+    opts = {**FAST, "intro_timeout": 60, "interview_seconds": 60, "grace_seconds": 60, **kwargs}
     return asyncio.create_task(run_stage_manager(session, agent, speech_state, **opts))
 
 
@@ -82,18 +97,51 @@ async def stop(task):
         pass
 
 
-async def test_role_in_intro_switches_persona_with_resume():
+class HookAgent(InterviewAgent):
+    """InterviewAgent with a fake session, for driving on_user_turn_completed directly."""
+    session = None
+
+
+def user_msg(text):
+    return llm.ChatMessage(role="user", content=[text])
+
+
+async def test_role_in_intro_turn_switches_before_llm_replies():
+    agent = HookAgent(resume_text="Jane Doe - 5 years in retail")
+    agent.session = FakeSession()
+    with pytest.raises(StopResponse):  # LLM must not answer the name/role turn
+        await agent.on_user_turn_completed(None, user_msg("Hi, I'm Jane, applying for a sales role"))
+    assert agent.current_stage == InterviewStage.EXPERIENCE
+    assert PERSONA_OVERRIDES["sales"] in agent.instructions
+    assert "Jane Doe - 5 years in retail" in agent.instructions
+    assert "I'm Jane, applying for a sales role" in agent.instructions  # name kept for the LLM
+    assert agent.session.said == [TRANSITION_PHRASES[InterviewStage.EXPERIENCE]]
+    assert "introduce yourself" in agent.session.said[0]
+
+
+async def test_intro_turn_without_role_lets_llm_reply():
+    agent = HookAgent()
+    agent.session = FakeSession()
+    await agent.on_user_turn_completed(None, user_msg("Hi, I'm Jane"))  # no StopResponse
+    assert agent.current_stage == InterviewStage.INTRO
+    assert agent.session.said == []
+
+
+async def test_hook_does_nothing_after_intro():
+    agent = HookAgent()
+    agent.session = FakeSession()
+    agent.current_stage = InterviewStage.EXPERIENCE
+    await agent.on_user_turn_completed(None, user_msg("I'm a software engineer"))
+    assert agent.session.said == []
+
+
+async def test_transition_only_happens_once():
     session = FakeSession()
-    agent = InterviewAgent(resume_text="Jane Doe - 5 years in retail")
-    task = start(session, agent, {"last_user_speech": time.time()})
-    try:
-        agent.intro_text = " Hi, I'm Jane, applying for a sales role"
-        await wait_for(lambda: agent.current_stage == InterviewStage.EXPERIENCE)
-        assert PERSONA_OVERRIDES["sales"] in agent.instructions
-        assert "Jane Doe - 5 years in retail" in agent.instructions
-        assert session.said == [TRANSITION_PHRASES[InterviewStage.EXPERIENCE]]
-    finally:
-        await stop(task)
+    agent = InterviewAgent()
+    await agent.start_experience(session, "technical")
+    await agent.start_experience(session, "hr")
+    assert session.said == [TRANSITION_PHRASES[InterviewStage.EXPERIENCE]]
+    assert PERSONA_OVERRIDES["technical"] in agent.instructions
 
 
 async def test_no_switch_before_intro_timeout():
@@ -159,7 +207,7 @@ async def test_full_flow_resets_stage_timer():
     session = FakeSession()
     agent = InterviewAgent()
     agent.intro_text = " I'm a recruiter"
-    task = start(session, agent, {"last_user_speech": 0}, interview_seconds=0.2)
+    task = start(session, agent, {"last_user_speech": 0}, intro_timeout=0, interview_seconds=0.2, grace_seconds=0)
     try:
         await wait_for(lambda: agent.current_stage == InterviewStage.EXPERIENCE)
         switched_at = time.time()
@@ -178,11 +226,111 @@ async def test_manager_survives_transient_exception(caplog):
     session = FakeSession(fail_times=1)
     agent = InterviewAgent()
     agent.intro_text = " applying as an engineer"
-    task = start(session, agent, {"last_user_speech": time.time()})
+    task = start(session, agent, {"last_user_speech": time.time()}, intro_timeout=0)
     try:
         await wait_for(lambda: agent.current_stage == InterviewStage.EXPERIENCE)
         assert not task.done()
         assert session.said == [TRANSITION_PHRASES[InterviewStage.EXPERIENCE]]
         assert "Stage manager iteration failed" in caplog.text
+    finally:
+        await stop(task)
+
+
+async def test_transitions_interrupt_pending_speech_before_speaking():
+    session = FakeSession()
+    agent = InterviewAgent()
+    agent.intro_text = " I'm a python developer"
+    task = start(session, agent, {"last_user_speech": 0}, intro_timeout=0, interview_seconds=0.05, grace_seconds=0)
+    try:
+        await wait_for(lambda: agent.current_stage == InterviewStage.CLOSING)
+        assert session.calls == [
+            ("interrupt",),
+            ("say", TRANSITION_PHRASES[InterviewStage.EXPERIENCE]),
+            ("interrupt",),
+            ("say", TRANSITION_PHRASES[InterviewStage.CLOSING]),
+        ]
+    finally:
+        await stop(task)
+
+
+async def test_persona_instructions_include_voice_rules():
+    agent = InterviewAgent(resume_text="resume")
+    await agent.update_role("technical")
+    assert "Ask exactly ONE question at a time" in agent.instructions
+    assert "under 25 words" in agent.instructions
+
+
+async def test_closing_does_not_cut_off_candidate_who_is_thinking():
+    session = FakeSession()
+    agent = InterviewAgent()
+    agent.current_stage = InterviewStage.EXPERIENCE
+    agent.stage_start_time = time.time() - 0.5
+    # Candidate last spoke before time ran out and is now silently thinking
+    speech_state = {"last_user_speech": agent.stage_start_time}
+    task = start(session, agent, speech_state, interview_seconds=0.2, silence_seconds=0.1, grace_seconds=60)
+    try:
+        await asyncio.sleep(0.3)  # time is up and they've been silent > silence_seconds
+        assert agent.current_stage == InterviewStage.EXPERIENCE
+        assert session.said == []
+
+        # They answer, then go quiet: now it closes
+        speech_state["last_user_speech"] = time.time()
+        await wait_for(lambda: agent.current_stage == InterviewStage.CLOSING)
+        assert session.said == [TRANSITION_PHRASES[InterviewStage.CLOSING]]
+    finally:
+        await stop(task)
+
+
+async def test_closing_happens_after_grace_period_without_answer():
+    session = FakeSession()
+    agent = InterviewAgent()
+    agent.current_stage = InterviewStage.EXPERIENCE
+    agent.stage_start_time = time.time()
+    speech_state = {"last_user_speech": agent.stage_start_time}  # never answers
+    task = start(session, agent, speech_state, interview_seconds=0.1, silence_seconds=0.05, grace_seconds=0.3)
+    try:
+        await asyncio.sleep(0.25)  # time up, but still inside grace
+        assert agent.current_stage == InterviewStage.EXPERIENCE
+        await wait_for(lambda: agent.current_stage == InterviewStage.CLOSING)
+        assert time.time() - agent.stage_start_time < 1
+    finally:
+        await stop(task)
+
+
+async def test_transition_asks_candidate_to_introduce_themselves():
+    session = FakeSession()
+    agent = InterviewAgent(resume_text="Built a chess engine in Rust")
+    agent.intro_text = " I'm Sam, applying for SDE"
+    task = start(session, agent, {"last_user_speech": time.time()}, intro_timeout=0)
+    try:
+        await wait_for(lambda: agent.current_stage == InterviewStage.EXPERIENCE)
+        assert "introduce yourself" in session.said[0]
+        assert "introduce themselves" in agent.instructions
+    finally:
+        await stop(task)
+
+
+async def test_closing_waits_while_agent_is_replying_to_skip_request():
+    session = FakeSession()
+    agent = InterviewAgent()
+    agent.current_stage = InterviewStage.EXPERIENCE
+    agent.stage_start_time = time.time() - 0.5  # time already up
+    # Candidate says "can we skip this?" after time ran out; agent starts replying
+    speech_state = {"last_user_speech": time.time(), "last_agent_speech_end": 0.0, "agent_busy": True}
+    task = start(session, agent, speech_state, interview_seconds=0.2, silence_seconds=0.05, grace_seconds=60)
+    try:
+        await asyncio.sleep(0.2)  # silent long enough, but the agent is still speaking
+        assert agent.current_stage == InterviewStage.EXPERIENCE
+
+        # Agent finishes asking a new question: candidate hasn't answered it yet
+        speech_state["agent_busy"] = False
+        speech_state["last_agent_speech_end"] = time.time()
+        await asyncio.sleep(0.2)
+        assert agent.current_stage == InterviewStage.EXPERIENCE
+        assert session.said == []
+
+        # Candidate answers the new question, then goes quiet: now it closes
+        speech_state["last_user_speech"] = time.time()
+        await wait_for(lambda: agent.current_stage == InterviewStage.CLOSING)
     finally:
         await stop(task)
